@@ -1,0 +1,26 @@
+{
+    "name": "appzz/telemetry2image",
+    "description": "Save gps telemetry to image",
+    "type": "library",
+    "keywords": [
+        "telemetry to image",
+        "dji"
+    ],
+    "homepage": "https://github.com/a-pp-zz/telemetry2image",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "CoolSwitcher",
+            "email": "ds@appzz.pw",
+            "role": "lead"
+        }
+    ],
+    "require": {
+        "php": ">=5.6",
+        "appzz/arr": "1.*",
+        "appzz/exiftool": "1.*"
+    },
+    "autoload": {
+        "psr-4": {"AppZz\\GeoTools\\": "src/"}
+    }
+}

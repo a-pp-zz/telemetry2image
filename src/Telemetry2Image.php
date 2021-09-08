@@ -6,7 +6,7 @@
  */
 namespace AppZz\GeoTools;
 use \AppZz\Helpers\Arr;
-use \AppZz\Tools\ExifTool;
+use \AppZz\CLI\Wrappers\ExifTool;
 use \Imagick;
 use \ImagickDraw;
 use \ImagickPixel;
@@ -18,6 +18,8 @@ class Telemetry2Image {
     private $_fonts = [];
     private $_values = [];
     private $_exif;
+    private $_source;
+    private $_wm;
 
     public function __construct ($input, $overwrite = false)
     {
@@ -26,6 +28,8 @@ class Telemetry2Image {
         if ($overwrite) {
             $this->_output = $input;
         }
+
+        $this->_source = new Imagick ($this->_input);
     }
 
     public function output ($output = null, $suffix = '-output')
@@ -104,70 +108,17 @@ class Telemetry2Image {
     {
         $metrics = $image->queryFontMetrics($draw, $text);
         $baseline = Arr::path ($metrics, 'boundingBox.y2');
-        $width = Arr::get($metrics, 'textWidth') + (2 * Arr::path($metrics, 'boundingBox.x1'));
+        $width = Arr::get($metrics, 'textWidth');// + (2 * Arr::path($metrics, 'boundingBox.x1'));
         $height = Arr::get($metrics, 'textHeight') + Arr::get($metrics, 'descender');
         return ['baseline'=>$baseline, 'width'=>$width, 'height'=>$height];
     }
 
-    public function save_image ($position = 'top-right', array $layout = [])
+    private function _get_overlay_real_postion (Imagick $overlay, $position = '', $padding = 0)
     {
-        if ( ! $this->_output) {
-            $this->output (null, '-overlay-'.$position);
-        }
-
-        $default_layout = [
-            'text_padding' => 0,
-            'padding' => 0,
-            'spacer' => 100,
-            'bg' => 'none',
-            'opacity_impl' => 0
-        ];
-
-        $layout = array_merge ($default_layout, $layout);
-        extract($layout);
-
-        $src_image = new Imagick ($this->_input);
-        $src_width = $src_image->getImageWidth();
-        $src_height = $src_image->getImageHeight();
-
-        $overlay = new Imagick;
-        $overlay->newImage($src_image->getImageWidth(), $src_image->getImageHeight(), new ImagickPixel($bg));
-        $overlay->setImageFormat('png');
-
-        if ($bg != 'none' AND $opacity_impl > 1) {
-            $overlay->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
-            $overlay->evaluateImage(Imagick::EVALUATE_DIVIDE, $opacity_impl, Imagick::CHANNEL_ALPHA);
-        }
-
-        $draw = new ImagickDraw();
-        $draw->setTextAntialias(true);
-        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-        $draw->setGravity(Imagick::GRAVITY_NORTHWEST);
-        $overlay_height = $text_padding;
-        $widths = [];
-
-        foreach ($this->_values as $num=>$value) {
-            $this->_set_font ('big', $draw);
-            $text_layout = $this->_get_text_layout ($value['value'], $overlay, $draw);
-            $overlay_height += Arr::get($text_layout, 'height');
-            $widths[] = Arr::get($text_layout, 'width');
-            $overlay->annotateImage($draw, $text_padding, $overlay_height, 0, $value['value']);
-
-            $this->_set_font ('small', $draw);
-            $text_layout = $this->_get_text_layout ($value['label'], $overlay, $draw);
-            $overlay_height += Arr::get($text_layout, 'height');
-            $widths[] = Arr::get($text_layout, 'width');
-            $overlay->annotateImage($draw, $text_padding, $overlay_height, 0, $value['label']);
-
-            if (($num + 1) !== count ($this->_values)) {
-                $overlay_height += $spacer;
-            } else {
-                $overlay_height += Arr::get($text_layout, 'baseline') + $text_padding;
-            }
-        }
-
-        $overlay_width  = max($widths) + (2 * $text_padding);
-        $overlay->cropImage ($overlay_width, $overlay_height, 0, 0);
+        $src_width = $this->_source->getImageWidth();
+        $src_height = $this->_source->getImageHeight();
+        $overlay_width = $overlay->getImageWidth();
+        $overlay_height = $overlay->getImageHeight();
 
         switch ($position) {
             case 'top-right':
@@ -215,10 +166,98 @@ class Telemetry2Image {
             break;
         }
 
+        return [$x, $y];
+    }
 
-        $src_image->compositeImage($overlay, Imagick::COMPOSITE_OVER, $x, $y);
-        $result = $src_image->writeImage($this->_output);
-        $src_image->clear();
+    public function watermark ($path, $position = 'right-bottom', $padding = 0, $size = 200, $opacity_impl = 0)
+    {
+        $this->_wm['object'] = new Imagick ($path);
+
+        if ($opacity_impl > 1) {
+           $this->_wm['object']->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+           $this->_wm['object']->evaluateImage(Imagick::EVALUATE_DIVIDE, $opacity_impl, Imagick::CHANNEL_ALPHA);
+        }
+
+        $this->_wm['object']->resizeImage ($size, $size, Imagick::FILTER_LANCZOS, 0.5);
+
+        $real_pos = $this->_get_overlay_real_postion ($this->_wm['object'], $position, $padding);
+        $this->_wm['x'] = $real_pos[0];
+        $this->_wm['y'] = $real_pos[1];
+
+        return $this;
+    }
+
+    public function save_image ($position = 'top-right', array $layout = [])
+    {
+        if ( ! $this->_output) {
+            $this->output (null, '-overlay-'.$position);
+        }
+
+        $default_layout = [
+            'text_padding' => 0,
+            'padding'      => 0,
+            'spacer'       => 100,
+            'extra_height' => 0,
+            'bg'           => 'none',
+            'opacity_impl' => 0,
+        ];
+
+        $layout = array_merge ($default_layout, $layout);
+        extract($layout);
+
+        $overlay = new Imagick;
+        $overlay->newImage($this->_source->getImageWidth(), $this->_source->getImageHeight(), new ImagickPixel($bg));
+        $overlay->setImageFormat('png');
+
+        if ($bg != 'none' AND $opacity_impl > 1) {
+           $overlay->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+           $overlay->evaluateImage(Imagick::EVALUATE_DIVIDE, $opacity_impl, Imagick::CHANNEL_ALPHA);
+        }
+
+        $draw = new ImagickDraw();
+        $draw->setTextAntialias(true);
+        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+        $overlay_height = $text_padding;
+        $widths = [];
+
+        foreach ($this->_values as $num=>$value) {
+            $this->_set_font ('big', $draw);
+            $text_layout = $this->_get_text_layout ($value['value'], $overlay, $draw);
+            $overlay_height += Arr::get($text_layout, 'height');
+
+            if ($num === 0) {
+                $overlay_height = Arr::get($text_layout, 'baseline') + $text_padding;
+            }
+
+            $widths[] = Arr::get($text_layout, 'width');
+            $overlay->annotateImage($draw, $text_padding, $overlay_height, 0, $value['value']);
+
+            $this->_set_font ('small', $draw);
+            $text_layout = $this->_get_text_layout ($value['label'], $overlay, $draw);
+            $overlay_height += Arr::get($text_layout, 'height');
+            $overlay_height += $extra_height;
+            $widths[] = Arr::get($text_layout, 'width');
+            $overlay->annotateImage($draw, $text_padding, $overlay_height, 0, $value['label']);
+
+            if (($num + 1) !== count ($this->_values)) {
+                $overlay_height += $spacer;
+            } else {
+                $overlay_height += $text_padding;
+            }
+        }
+
+        $overlay_width  = max($widths) + (2 * $text_padding);
+        $overlay->cropImage ($overlay_width, $overlay_height, 0, 0);
+        list ($x, $y) = $this->_get_overlay_real_postion ($overlay, $position, $padding);
+
+        $this->_source->compositeImage($overlay, Imagick::COMPOSITE_OVER, $x, $y);
+
+        if ( ! empty ($this->_wm)) {
+            $this->_source->compositeImage($this->_wm['object'], Imagick::COMPOSITE_OVER, $this->_wm['x'], $this->_wm['y']);
+        }
+
+        $result = $this->_source->writeImage($this->_output);
+        $this->_source->clear();
         $overlay->clear();
         $this->_output = null;
         return $result;

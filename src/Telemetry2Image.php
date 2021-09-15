@@ -187,7 +187,7 @@ class Telemetry2Image {
         return $this;
     }
 
-    public function save_image ($position = 'top-right', array $layout = [])
+    public function save_image ($position = 'top-right', array $layout = [], $stdout = FALSE)
     {
         if ( ! $this->_output) {
             $this->output (null, '-overlay-'.$position);
@@ -256,10 +256,24 @@ class Telemetry2Image {
             $this->_source->compositeImage($this->_wm['object'], Imagick::COMPOSITE_OVER, $this->_wm['x'], $this->_wm['y']);
         }
 
-        $result = $this->_source->writeImage($this->_output);
+        if ($stdout) {
+			$this->_source->setImageFormat('jpeg');
+        	$result = $this->_source->getImagesBlob();
+		} else {
+			$result = $this->_source->writeImage($this->_output);
+		}
+
         $this->_source->clear();
         $overlay->clear();
         $this->_output = null;
+
+        if ($stdout) {
+        	ob_clean();
+        	header('Content-Type: image/jpeg', TRUE);
+        	echo $result;
+        	exit;
+		}
+
         return $result;
     }
 }

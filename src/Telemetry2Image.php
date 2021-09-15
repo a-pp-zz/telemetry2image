@@ -218,7 +218,7 @@ class Telemetry2Image {
         $draw->setTextAntialias(true);
         $draw->setTextAlignment(Imagick::ALIGN_LEFT);
         $overlay_height = $text_padding;
-        $widths = [];
+        $widths = [0];
 
         foreach ($this->_values as $num=>$value) {
             $this->_set_font ('big', $draw);
